@@ -7,12 +7,13 @@ from discord.ext import tasks
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-API_URL = "http://reactcast-backend:8000/api/suggestions/"
+
+API_URL = os.getenv('BACKEND_URL', "http://backend:8000/api/suggestions/")
+
 VIP_ROLE_NAME = os.getenv('VIP_ROLE_NAME', 'VIP')
 
-# Globale Caches für das dynamische Multi-Team-Handling
-channel_teams = {}  # Format: channel_id (int) -> team_id (int)
-channel_locks = {}  # Format: channel_id (int) -> is_locked (bool)
+channel_teams = {}
+channel_locks = {}
 
 class RequestListButton(discord.ui.View):
     def __init__(self):
@@ -20,7 +21,6 @@ class RequestListButton(discord.ui.View):
 
     @discord.ui.button(label="Aktuelle Liste per DM 📬", style=discord.ButtonStyle.primary, custom_id="get_list_button")
     async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Finde heraus, zu welchem Team dieser Kanal gehört
         team_id = channel_teams.get(interaction.channel_id)
         if not team_id:
             await interaction.response.send_message("Dieser Kanal ist aktuell keiner aktiven Streamer-Community zugeordnet!", ephemeral=True)
@@ -88,10 +88,8 @@ async def sync_bot_channels():
                         team_id = team["id"]
                         is_locked = team["is_channel_locked"]
                         
-                        # In temporäre Map eintragen
                         fresh_channel_teams[ch_id] = team_id
                         
-                        # Statusänderung (Lock/Unlock) ermitteln
                         old_lock_state = channel_locks.get(ch_id)
                         if old_lock_state != is_locked:
                             channel_locks[ch_id] = is_locked
@@ -159,7 +157,6 @@ async def on_message(message):
         await message.delete()
         return
 
-    # 2. Link-Verarbeitung
     url_match = re.search(r"(?P<url>https?://[^\s]+)", message.content)
     if url_match:
         detected_url = url_match.group("url")
