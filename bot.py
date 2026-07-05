@@ -19,7 +19,7 @@ class RequestListButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None) 
 
-    @discord.ui.button(label="Aktuelle Liste per DM 📬", style=discord.ButtonStyle.primary, custom_id="get_list_button")
+    @discord.ui.button(label="Aktuelle Liste per DM", style=discord.ButtonStyle.primary, custom_id="get_list_button")
     async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         team_id = channel_teams.get(interaction.channel_id)
         if not team_id:
@@ -65,7 +65,6 @@ client = discord.Client(intents=intents)
 @tasks.loop(seconds=4)
 async def sync_bot_channels():
     global channel_teams, channel_locks
-    print("[Loop] Synchronisiere registrierte Team-Kanäle aus der DB...", flush=True)
     
     try:
         async with aiohttp.ClientSession() as session:
