@@ -1,28 +1,19 @@
-import logging
-import os
-import re
-import aiohttp
 import discord
-from discord.ext import tasks
+import aiohttp
+import re
+import os
 from dotenv import load_dotenv
+from discord.ext import tasks
 
 load_dotenv()
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-log = logging.getLogger("reactcast-bot")
-
 TOKEN = os.getenv('DISCORD_TOKEN')
-if not TOKEN:
-    raise RuntimeError("DISCORD_TOKEN ist nicht gesetzt. Bitte .env-Datei prüfen.")
 
 API_URL = os.getenv('BACKEND_URL', "http://backend:8000/api/suggestions/")
 
 VIP_ROLE_NAME = os.getenv('VIP_ROLE_NAME', 'VIP')
 
-channel_teams: dict[int, int] = {}
-channel_locks: dict[int, bool] = {}
+channel_teams = {}
+channel_locks = {}
 
 class RequestListButton(discord.ui.View):
     def __init__(self):
@@ -30,14 +21,15 @@ class RequestListButton(discord.ui.View):
 
     @discord.ui.button(label="Aktuelle Liste per DM", style=discord.ButtonStyle.primary, custom_id="get_list_button")
     async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        team_id = channel_teams.get(interaction.channel_id) if interaction.channel_id else None
+        team_id = channel_teams.get(interaction.channel_id)
         if not team_id:
             await interaction.response.send_message("Dieser Kanal ist aktuell keiner aktiven Streamer-Community zugeordnet!", ephemeral=True)
             return
 
         headers = {"X-Team-ID": str(team_id)}
         try:
-            async with aiohttp.ClientSession() as session, session.get(API_URL, headers=headers) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(API_URL, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
                         vips = data.get('vip_pool', [])
@@ -62,9 +54,9 @@ class RequestListButton(discord.ui.View):
                         await interaction.response.send_message("Ich habe dir die Liste als Direktnachricht geschickt!", ephemeral=True)
                     else:
                         await interaction.response.send_message("Fehler beim Abrufen der API.", ephemeral=True)
-        except Exception:
+        except Exception as e:
             await interaction.response.send_message("Konnte das Backend nicht erreichen.", ephemeral=True)
-            log.exception("Fehler beim Abrufen der Vorschlagsliste per Button")
+            print(e, flush=True)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -72,10 +64,11 @@ client = discord.Client(intents=intents)
 
 @tasks.loop(seconds=4)
 async def sync_bot_channels():
-    global channel_teams
+    global channel_teams, channel_locks
     
     try:
-        async with aiohttp.ClientSession() as session, session.get(API_URL + "bot/teams/") as response:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(API_URL + "bot/teams/") as response:
                 if response.status == 200:
                     teams_data = await response.json()
                     
@@ -102,35 +95,35 @@ async def sync_bot_channels():
                             
                             try:
                                 channel = await client.fetch_channel(ch_id)
-                                if isinstance(channel, discord.TextChannel):
+                                if channel:
                                     overwrite = channel.overwrites_for(channel.guild.default_role)
                                     overwrite.send_messages = not is_locked
                                     await channel.set_permissions(channel.guild.default_role, overwrite=overwrite)
-                                    log.info("Kanalrechte für %s angepasst! Gesperrt=%s", ch_id, is_locked)
+                                    print(f"[Loop] Kanalrechte für {ch_id} angepasst! Gesperrt={is_locked}", flush=True)
                                     
                                     if old_lock_state is not None:
                                         if is_locked:
-                                            await channel.send("**Channel zu!** Gerne wieder im nächsten Stream. **Sonntag 16:00 Uhr.**")
+                                            await channel.send("**Channel zu!** Gerne wieder im nächsten Stream. **Sonntag 17:00 Uhr.**")
                                         else:
                                             await channel.send("**Channel geöffnet!** Ihr könnt wieder Songs einreichen. **Bitte vorher die angepinnte Nachricht lesen!**")
-                            except Exception:
-                                log.exception("Fehler beim Anpassen der Kanalrechte für %s", ch_id)
+                            except Exception as e:
+                                print(f"[Loop] Fehler beim Anpassen der Kanalrechte für {ch_id}: {e}", flush=True)
                                 
                     channel_teams = fresh_channel_teams
                 else:
-                    log.warning("Backend Fehler: Statuscode %s", response.status)
-    except Exception:
-        log.exception("Verbindung zum Django-Backend fehlgeschlagen")
+                    print(f"[Loop] Backend Fehler: Statuscode {response.status}", flush=True)
+    except Exception as e:
+        print(f"[Loop] Verbindung zum Django-Backend fehlgeschlagen: {e}", flush=True)
 
 @client.event
 async def on_connect():
-    log.info("Bot erfolgreich mit Discord verbunden. Synchronisations-Loop startet...")
+    print("Bot erfolgreich mit Discord verbunden. Synchronisations-Loop startet...", flush=True)
     if not sync_bot_channels.is_running():
         sync_bot_channels.start()
 
 @client.event
 async def on_ready():
-    log.info("Bot-Cache vollständig geladen. Bereit als %s", client.user)
+    print(f'Bot-Cache vollständig geladen. Bereit als {client.user}', flush=True)
     client.add_view(RequestListButton())
 
 @client.event
@@ -154,12 +147,12 @@ async def on_message(message):
 
     if message.content == "!reset" and message.author.guild_permissions.administrator:
         try:
-            async with aiohttp.ClientSession() as session, session.post(API_URL + "reset/", headers=headers) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(API_URL + "reset/", headers=headers) as response:
                     if response.status == 200:
                         await message.channel.send("**Alle tokens wurden zurück gesetzt. **")
         except Exception:
             await message.channel.send("Konnte das Backend nicht erreichen.")
-            log.exception("Fehler beim Zurücksetzen der Tokens")
         await message.delete()
         return
 
@@ -171,11 +164,11 @@ async def on_message(message):
             try:
                 await message.delete()
                 await message.channel.send(
-                    f"⚠️ {message.author.mention}, in diesem Kanal sind ausschließlich Links von YouTube erlaubt!", 
+                    f"⚠ {message.author.mention}, in diesem Kanal sind ausschließlich Links von YouTube erlaubt!", 
                     delete_after=5
                 )
-            except Exception:
-                log.exception("Fehler beim Löschen einer Fremd-URL")
+            except Exception as e:
+                print(f"Fehler beim Löschen einer Fremd-URL: {e}", flush=True)
             return
 
         is_vip = any(role.name == VIP_ROLE_NAME for role in message.author.roles) if hasattr(message.author, 'roles') else False
@@ -188,7 +181,8 @@ async def on_message(message):
         }
 
         try:
-            async with aiohttp.ClientSession() as session, session.post(API_URL, json=payload, headers=headers) as response:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(API_URL, json=payload, headers=headers) as response:
                     if response.status in [201, 202]:
                         await message.add_reaction("✅")
                         if is_vip:
@@ -202,7 +196,5 @@ async def on_message(message):
                         data = await response.json()
                         error_msg = data.get("error", "Unbekannter Fehler")
                         await message.author.send(f"Dein Vorschlag wurde abgelehnt:\n**Grund:** {error_msg}")
-        except Exception:
-            log.exception("Fehler bei der Verbindung zu Django")
-
-client.run(TOKEN)
+        except Exception as e:
+            print(f"Fehler bei der Verbindung zu Django: {e}", flush=True)

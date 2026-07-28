@@ -1,3 +1,5 @@
 .dockerignore
 .env
 .vscode
+.server.bot.py.
+.__pycache__
