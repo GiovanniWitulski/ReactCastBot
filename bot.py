@@ -15,7 +15,11 @@ log = logging.getLogger("reactcast-bot")
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-API_URL = os.getenv('BACKEND_URL', "http://backend:8000/api/suggestions/")
+# Muss auf den Backend-Service im docker-compose-Netzwerk zeigen. Der Service
+# heisst dort "reactcast-backend", nicht "backend".
+API_URL = os.getenv(
+    'BACKEND_URL', "http://reactcast-backend:8000/api/suggestions/"
+)
 
 VIP_ROLE_NAME = os.getenv('VIP_ROLE_NAME', 'VIP')
 
