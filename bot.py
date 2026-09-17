@@ -197,14 +197,16 @@ async def on_message(message):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(API_URL, json=payload, headers=headers) as response:
-                    if response.status in [201, 202]:
+                    if response.status == 201:
                         await message.add_reaction("✅")
                         if is_vip:
                             await message.add_reaction("🌟")
-                    elif response.status == 200:
+                    elif response.status == 202:
                         data = await response.json()
                         if data.get("status") == "already_played":
                             await message.add_reaction("🔄")
+                            error_msg = data.get("error", "Dieser Song wurde bereits im Stream gespielt!")
+                            await message.author.send(f"Dein Vorschlag wurde abgelehnt:\n**Grund:** {error_msg}")
                     elif response.status == 400:
                         await message.add_reaction("❌")
                         data = await response.json()
