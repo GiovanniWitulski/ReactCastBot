@@ -14,6 +14,8 @@ logging.basicConfig(
 log = logging.getLogger("reactcast-bot")
 
 TOKEN = os.getenv('DISCORD_TOKEN')
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN ist nicht gesetzt. Bitte .env-Datei prüfen.")
 
 # Muss auf den Backend-Service im docker-compose-Netzwerk zeigen. Der Service
 # heisst dort "reactcast-backend", nicht "backend".
@@ -23,8 +25,8 @@ API_URL = os.getenv(
 
 VIP_ROLE_NAME = os.getenv('VIP_ROLE_NAME', 'VIP')
 
-channel_teams = {}
-channel_locks = {}
+channel_teams: dict[int, int] = {}
+channel_locks: dict[int, bool] = {}
 
 
 class RequestListButton(discord.ui.View):
@@ -218,3 +220,7 @@ async def on_message(message):
                         await message.author.send(f"Dein Vorschlag wurde abgelehnt:\n**Grund:** {error_msg}")
         except Exception:
             log.exception("Fehler bei der Verbindung zu Django")
+
+
+if __name__ == "__main__":
+    client.run(TOKEN)
