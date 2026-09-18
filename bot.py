@@ -25,8 +25,35 @@ API_URL = os.getenv(
 
 VIP_ROLE_NAME = os.getenv('VIP_ROLE_NAME', 'VIP')
 
+# Reactions carry the outcome of a submission. They are named here so the
+# meaning is readable at the call site and encoded once, not inline.
+OK_REACTION = "\u2705"          # accepted
+VIP_REACTION = "\U0001F31F"     # accepted, into the VIP wheel
+REPEAT_REACTION = "\U0001F504"  # already played
+REJECT_REACTION = "\u274c"      # rejected with a reason
+WARN_REACTION = "\u26a0\ufe0f"  # rejected for a technical reason
+
 channel_teams: dict[int, int] = {}
 channel_locks: dict[int, bool] = {}
+
+
+async def read_json(response, default=None):
+    """Return the JSON body, or ``default`` when the body is not JSON.
+
+    A rejected request may carry an HTML error page (proxy, crash page). That
+    is still a rejection, so it must not be reported as "backend unreachable".
+    """
+    try:
+        return await response.json()
+    except Exception:
+        log.warning("Antwort war kein JSON (Status %s)", response.status)
+        return {} if default is None else default
+
+
+async def read_error(response, fallback):
+    """Return the 'error' field of a response body, or ``fallback``."""
+    data = await read_json(response)
+    return data.get("error") or fallback
 
 
 class RequestListButton(discord.ui.View):
@@ -204,22 +231,55 @@ async def on_message(message):
             async with aiohttp.ClientSession() as session:
                 async with session.post(API_URL, json=payload, headers=headers) as response:
                     if response.status == 201:
-                        await message.add_reaction("✅")
+                        await message.add_reaction(OK_REACTION)
                         if is_vip:
-                            await message.add_reaction("🌟")
+                            await message.add_reaction(VIP_REACTION)
                     elif response.status == 202:
-                        data = await response.json()
+                        data = await read_json(response)
                         if data.get("status") == "already_played":
-                            await message.add_reaction("🔄")
+                            await message.add_reaction(REPEAT_REACTION)
                             error_msg = data.get("error", "Dieser Song wurde bereits im Stream gespielt!")
                             await message.author.send(f"Dein Vorschlag wurde abgelehnt:\n**Grund:** {error_msg}")
                     elif response.status == 400:
-                        await message.add_reaction("❌")
-                        data = await response.json()
-                        error_msg = data.get("error", "Unbekannter Fehler")
+                        await message.add_reaction(REJECT_REACTION)
+                        error_msg = await read_error(response, "Unbekannter Fehler")
                         await message.author.send(f"Dein Vorschlag wurde abgelehnt:\n**Grund:** {error_msg}")
+                    elif response.status == 404:
+                        # The channel maps to a team the backend no longer knows.
+                        # Staying silent used to swallow the suggestion entirely.
+                        await message.add_reaction(WARN_REACTION)
+                        await message.author.send(
+                            "Dein Vorschlag konnte nicht angenommen werden:\n"
+                            "**Grund:** Dieser Kanal ist keinem Team mehr zugeordnet. "
+                            "Bitte einen Admin informieren."
+                        )
+                        log.error(
+                            "Backend kennt Team %s nicht mehr (Kanal %s)",
+                            team_id,
+                            message.channel.id,
+                        )
+                    else:
+                        await message.add_reaction(WARN_REACTION)
+                        await message.author.send(
+                            "Dein Vorschlag konnte gerade nicht gepr\u00fcft werden:\n"
+                            "**Grund:** Technischer Fehler im Backend. Bitte sp\u00e4ter erneut versuchen."
+                        )
+                        log.error(
+                            "Unerwarteter Statuscode %s beim Einreichen eines Vorschlags",
+                            response.status,
+                        )
         except Exception:
+            # Network trouble must be visible too: the user should know the
+            # suggestion was not registered instead of assuming it was.
             log.exception("Fehler bei der Verbindung zu Django")
+            try:
+                await message.add_reaction(WARN_REACTION)
+                await message.author.send(
+                    "Dein Vorschlag konnte gerade nicht gepr\u00fcft werden:\n"
+                    "**Grund:** Das Backend war nicht erreichbar. Bitte sp\u00e4ter erneut versuchen."
+                )
+            except Exception:
+                log.exception("Konnte den Nutzer nicht \u00fcber den Fehler informieren")
 
 
 if __name__ == "__main__":
