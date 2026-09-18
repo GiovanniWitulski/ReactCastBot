@@ -146,7 +146,7 @@ async def sync_bot_channels():
 
                                     if old_lock_state is not None:
                                         if is_locked:
-                                            await channel.send("**Channel zu!** Gerne wieder im nächsten Stream. **Sonntag 17:00 Uhr.**")
+                                            await channel.send("**Channel zu!** Gerne wieder im nächsten Stream. **Sonntag 16:00 Uhr.**")
                                         else:
                                             await channel.send("**Channel geöffnet!** Ihr könnt wieder Songs einreichen. **Bitte vorher die angepinnte Nachricht lesen!**")
                             except Exception:
